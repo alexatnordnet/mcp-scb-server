@@ -1,0 +1,49 @@
+{
+  "name": "mcp-scb-server",
+  "version": "0.1.0",
+  "description": "Generic MCP server for PX-Web statistical APIs (SCB, Statistics Finland, etc.)",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "build:types": "echo 'Types generated successfully'",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "generate": "kubb generate",
+    "test-generation": "npm run generate && tsx src/test-generation.ts",
+    "demo": "tsx src/demo.ts",
+    "test": "jest"
+  },
+  "keywords": [
+    "mcp",
+    "statistics",
+    "px-web",
+    "scb",
+    "statistics-sweden",
+    "statistics-finland",
+    "openapi"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.4.0",
+    "zod": "^3.22.4",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@kubb/cli": "^3.10.12",
+    "@kubb/core": "^3.10.12",
+    "@kubb/plugin-oas": "^3.10.12",
+    "@kubb/plugin-ts": "^3.10.12",
+    "@kubb/plugin-zod": "^3.10.12",
+    "@kubb/plugin-mcp": "^3.10.12",
+    "@types/node": "^20.10.0",
+    "tsx": "^4.6.0",
+    "typescript": "^5.3.0",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.8"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

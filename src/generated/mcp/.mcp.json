@@ -1,0 +1,9 @@
+{
+            "mcpServers": {
+              "PxApi": {
+                "type": "stdio",
+                "command": "npx",
+                "args": ["tsx", "/Users/alelin3/dev/fun/mcp-scb-server/src/generated/mcp/server.ts"]
+              }
+            }
+          }
