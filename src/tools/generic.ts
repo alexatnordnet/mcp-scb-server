@@ -312,13 +312,13 @@ export async function executeSearchTables(params: z.infer<typeof SearchTablesToo
  * Generic tool: Get table metadata
  */
 export const GetTableMetadataToolSchema = ApiSourceSchema.extend({
-  table_id: z.string().describe('Unique identifier of the table (obtained from navigation results). Examples: "BE0101N1", "NR0103ENS2010T02A"'),
+  table_id: z.string().describe('FULL PATH to the table from navigation results. Examples: "ssd/MI/MI0107/TotaltUtslappN" (SCB), "StatFin/khki/statfin_khki_pxt_138v.px" (StatFi), "Greenland/EN/EN20/ENX1ACT.px" (Greenland). Do NOT use just the table name - use the complete path with all directories.'),
   include_default_selection: z.boolean().default(false).describe('Include default variable selections in metadata'),
 });
 
 export const getTableMetadataTool: Tool = {
   name: 'px_get_table_metadata',
-  description: 'Get detailed metadata about a statistical table including all available variables (dimensions like Age, Time, Region) and their possible values. Essential for understanding table structure before querying data. Use table_id from navigation results.',
+  description: 'Get detailed metadata about a statistical table including all available variables (dimensions like Age, Time, Region) and their possible values. Essential for understanding table structure before querying data. IMPORTANT: Use the FULL PATH from navigation results as table_id. Examples: "ssd/MI/MI0107/TotaltUtslappN" for SCB, "StatFin/khki/statfin_khki_pxt_138v.px" for StatFi, "Greenland/EN/EN20/ENX1ACT.px" for Greenland.',
   inputSchema: zodToMcpSchema(GetTableMetadataToolSchema),
 };
 
@@ -326,8 +326,44 @@ export async function executeGetTableMetadata(params: z.infer<typeof GetTableMet
   const client = createClientFromParams(params);
   
   try {
-    // Use the existing getTableMetadata method that uses correct PX-Web API pattern
-    const response = await client.getTableMetadata(params.table_id, params.language);
+    // Build proper table path based on our curl test findings
+    let tablePath = params.table_id;
+    
+    // For table IDs that are just names (not full paths), we need to construct the full path
+    // This should match the pattern from navigation results
+    if (params.api_source === 'scb') {
+      // SCB tables need full path: ssd/category/subcategory/table_id
+      // If table_id doesn't start with 'ssd/', we need to add path context
+      if (!tablePath.includes('/')) {
+        // This is just a table name, we need more context
+        // For now, return error suggesting user provide full path from navigation
+        throw new PxWebError(
+          'INCOMPLETE_TABLE_PATH',
+          `For SCB, table_id should be the full path from navigation (e.g., 'ssd/MI/MI0107/TotaltUtslappN'), not just '${tablePath}'. Use px_get_navigation_by_path to find the complete path.`,
+          params.api_source
+        );
+      }
+    } else if (params.api_source === 'statfi') {
+      // StatFi tables need full path: StatFin/category/table.px
+      if (!tablePath.includes('/')) {
+        throw new PxWebError(
+          'INCOMPLETE_TABLE_PATH',
+          `For StatFi, table_id should be the full path from navigation (e.g., 'StatFin/khki/statfin_khki_pxt_138v.px'), not just '${tablePath}'. Use px_get_navigation_by_path to find the complete path.`,
+          params.api_source
+        );
+      }
+    } else if (params.api_source === 'greenland') {
+      // Greenland tables need full path: Greenland/category/subcategory/table.px
+      if (!tablePath.includes('/')) {
+        throw new PxWebError(
+          'INCOMPLETE_TABLE_PATH',
+          `For Greenland, table_id should be the full path from navigation (e.g., 'Greenland/EN/EN20/ENX1ACT.px'), not just '${tablePath}'. Use px_get_navigation_by_path to find the complete path.`,
+          params.api_source
+        );
+      }
+    }
+    
+    const response = await client.getTableMetadata(tablePath, params.language);
     return response;
   } catch (error) {
     if (error instanceof PxWebError) {
@@ -346,7 +382,7 @@ export async function executeGetTableMetadata(params: z.infer<typeof GetTableMet
  * Generic tool: Query table data
  */
 export const QueryTableDataToolSchema = ApiSourceSchema.extend({
-  table_id: z.string().describe('Unique identifier of the table (same as used in metadata call)'),
+  table_id: z.string().describe('FULL PATH to the table from navigation results (same as used in metadata call). Examples: "ssd/MI/MI0107/TotaltUtslappN" (SCB), "StatFin/khki/statfin_khki_pxt_138v.px" (StatFi), "Greenland/EN/EN20/ENX1ACT.px" (Greenland)'),
   format: z.enum(['json-stat2', 'csv', 'xlsx', 'px', 'json-px', 'json']).default('json')
     .describe('Output format for the data. "json" is recommended for Claude processing'),
   variable_selections: z.array(z.object({
@@ -358,7 +394,7 @@ export const QueryTableDataToolSchema = ApiSourceSchema.extend({
 
 export const queryTableDataTool: Tool = {
   name: 'px_query_table_data',
-  description: 'Retrieve actual statistical data from a table. IMPORTANT: Always get table metadata first to understand available variables and values. Requires variable_selections with specific variable codes and value codes from the metadata. Example: [{"variable_code": "Alder", "value_codes": ["tot"]}, {"variable_code": "Tid", "value_codes": ["2024"]}]',
+  description: 'Retrieve actual statistical data from a table. IMPORTANT: Always get table metadata first to understand available variables and values. Use the FULL PATH from navigation as table_id (e.g., "ssd/MI/MI0107/TotaltUtslappN" for SCB). Requires variable_selections with specific variable codes and value codes from the metadata. Example: [{"variable_code": "Alder", "value_codes": ["tot"]}, {"variable_code": "Tid", "value_codes": ["2024"]}]',
   inputSchema: zodToMcpSchema(QueryTableDataToolSchema),
 };
 
@@ -366,6 +402,29 @@ export async function executeQueryTableData(params: z.infer<typeof QueryTableDat
   const client = createClientFromParams(params);
   
   try {
+    // Validate table path like in metadata function
+    let tablePath = params.table_id;
+    
+    if (params.api_source === 'scb' && !tablePath.includes('/')) {
+      throw new PxWebError(
+        'INCOMPLETE_TABLE_PATH',
+        `For SCB, table_id should be the full path from navigation (e.g., 'ssd/MI/MI0107/TotaltUtslappN'), not just '${tablePath}'. Use px_get_navigation_by_path to find the complete path.`,
+        params.api_source
+      );
+    } else if (params.api_source === 'statfi' && !tablePath.includes('/')) {
+      throw new PxWebError(
+        'INCOMPLETE_TABLE_PATH',
+        `For StatFi, table_id should be the full path from navigation (e.g., 'StatFin/khki/statfin_khki_pxt_138v.px'), not just '${tablePath}'. Use px_get_navigation_by_path to find the complete path.`,
+        params.api_source
+      );
+    } else if (params.api_source === 'greenland' && !tablePath.includes('/')) {
+      throw new PxWebError(
+        'INCOMPLETE_TABLE_PATH',
+        `For Greenland, table_id should be the full path from navigation (e.g., 'Greenland/EN/EN20/ENX1ACT.px'), not just '${tablePath}'. Use px_get_navigation_by_path to find the complete path.`,
+        params.api_source
+      );
+    }
+    
     if (params.variable_selections && params.variable_selections.length > 0) {
       // Use the WORKING POST format from our curl test
       const queryBody = {
@@ -382,14 +441,14 @@ export async function executeQueryTableData(params: z.infer<typeof QueryTableDat
       };
 
       const response = await client.queryDataWithWorkingFormat(
-        params.table_id,
+        tablePath,
         queryBody,
         params.language
       );
       return response;
     } else {
       // For simple queries without selections, return metadata with note
-      const response = await client.getTableMetadata(params.table_id, params.language);
+      const response = await client.getTableMetadata(tablePath, params.language);
       return {
         ...response,
         note: 'No variable selections provided. Returned table metadata. To get actual data, specify variable_selections with variable codes and value codes.',
