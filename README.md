@@ -34,20 +34,14 @@ npm run build
 # Test the API registry system
 npm run demo
 
-# Generate and test Kubb code generation
-npm run test-generation
-
-# Test MCP server functionality
-npm run test-mcp
-
 # Verify TypeScript compilation
 npm run verify
 
-# Run all tests comprehensively
-npm run test-all
-
 # Development mode
 npm run dev
+
+# Generate code from OpenAPI specs
+npm run generate
 ```
 
 ## Usage
@@ -108,8 +102,8 @@ See [claude-desktop-config.md](./claude-desktop-config.md) for detailed setup in
 ### 3. Test the Server
 
 ```bash
-# Test MCP server functionality
-npm run test-mcp
+# Test the API registry system
+npm run demo
 ```
 
 ## Example Queries
@@ -147,7 +141,7 @@ If you encounter TypeScript errors:
    - Verify TypeScript compilation: `npm run verify`
 
 2. **Tools not working**:
-   - Test individual components: `npm run demo` and `npm run test-mcp`
+   - Test individual components: `npm run demo`
    - Check Claude Desktop configuration
 
 3. **API rate limits**:
@@ -155,17 +149,17 @@ If you encounter TypeScript errors:
    - The server respects these automatically
    - Wait if you encounter rate limit errors
 
-### Comprehensive Testing
+### Manual Testing
 
-Run the full test suite:
+You can test individual components:
 
 ```bash
-npm run test-all
-```
+# Test the API registry system
+npm run demo
 
-This will:
-1. Regenerate all code
-2. Verify TypeScript compilation
-3. Test API registry
-4. Test MCP server
-5. Test build process
+# Verify TypeScript compilation 
+npm run verify
+
+# Test the build process
+npm run build
+```
