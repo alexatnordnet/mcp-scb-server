@@ -1,6 +1,15 @@
 /**
  * Generic MCP tools wrapper that integrates generated tools with our API registry
  * This file bridges the gap between Kubb-generated tools and our multi-API approach
+ * 
+ * TYPICAL WORKFLOW FOR ACCESSING STATISTICAL DATA:
+ * 1. px_discover_apis - Find available statistical agencies
+ * 2. px_get_root_navigation - Browse main topic categories (Population, Economy, etc.)
+ * 3. px_get_navigation_by_path - Drill down to specific data tables 
+ * 4. px_get_table_metadata - Understand table structure and available variables
+ * 5. px_query_table_data - Retrieve actual statistical data with specific filters
+ * 
+ * IMPORTANT: PX-Web APIs do not support search - you must navigate hierarchically
  */
 
 import { z } from 'zod';
@@ -13,11 +22,11 @@ import { getApiConfig, getAvailableApis } from '../registry.js';
  */
 export const ApiSourceSchema = z.object({
   api_source: z.enum(['scb', 'statfi', 'statice', 'hagstova', 'greenland', 'custom'] as const)
-    .describe('Which PX-Web API to query'),
+    .describe('Which PX-Web API to query: "scb" for Sweden, "statfi" for Finland, "statice" for Iceland, "hagstova" for Faroe Islands, "greenland" for Greenland, "custom" for other PX-Web APIs'),
   custom_endpoint: z.string().optional()
-    .describe('Custom API endpoint URL (required if api_source is "custom")'),
+    .describe('Custom API endpoint URL (required if api_source is "custom"). Must be a valid PX-Web API base URL'),
   language: z.string().default('en')
-    .describe('Language code for the response (en, sv, fi, etc.)'),
+    .describe('Language code for the response. Common values: "en" (English), "sv" (Swedish), "fi" (Finnish), "is" (Icelandic), "da" (Danish)'),
 });
 
 /**
@@ -140,7 +149,7 @@ export const DiscoverApisToolSchema = z.object({
 
 export const discoverApisTool: Tool = {
   name: 'px_discover_apis',
-  description: 'Discover available PX-Web statistical APIs and their capabilities',
+  description: 'Discover available PX-Web statistical APIs and their capabilities. Use this first to find which Nordic statistical agencies (Sweden, Finland, Iceland, Faroe Islands, Greenland) have data available. Returns API IDs needed for other tools.',
   inputSchema: zodToMcpSchema(DiscoverApisToolSchema),
 };
 
@@ -187,7 +196,7 @@ export const GetRootNavigationToolSchema = ApiSourceSchema;
 
 export const getRootNavigationTool: Tool = {
   name: 'px_get_root_navigation',
-  description: 'Get the root navigation structure showing available databases and folders from a PX-Web API',
+  description: 'Get the root navigation structure showing available databases and topic categories (e.g., Population, Economy, Education) from a PX-Web API. Use this to browse the main statistical subject areas available in an API. Required parameter: api_source (scb, statfi, statice, hagstova, greenland).',
   inputSchema: zodToMcpSchema(GetRootNavigationToolSchema),
 };
 
@@ -214,12 +223,12 @@ export async function executeGetRootNavigation(params: z.infer<typeof GetRootNav
  * Generic tool: Get navigation by path
  */
 export const GetNavigationByPathToolSchema = ApiSourceSchema.extend({
-  path: z.string().describe('Database/folder path to navigate to'),
+  path: z.string().describe('Database/folder path to navigate to (e.g., "BE" for Population, "NR" for National Accounts). Use paths from previous navigation results.'),
 });
 
 export const getNavigationByPathTool: Tool = {
   name: 'px_get_navigation_by_path',
-  description: 'Navigate to a specific path in the database hierarchy to see available folders and tables',
+  description: 'Navigate deeper into statistical topic areas to find specific data tables. Use the path from previous navigation results to drill down (e.g., "BE" for Population, "NR" for National Accounts). Returns subfolders and actual data tables with their IDs.',
   inputSchema: zodToMcpSchema(GetNavigationByPathToolSchema),
 };
 
@@ -255,7 +264,7 @@ export const SearchTablesToolSchema = ApiSourceSchema.extend({
 
 export const searchTablesTool: Tool = {
   name: 'px_search_tables',
-  description: 'Search for statistical tables across a PX-Web API with filtering options',
+  description: 'NOTE: Most PX-Web APIs do not support search functionality. Use navigation tools (px_get_root_navigation and px_get_navigation_by_path) instead to browse categories and find tables. This tool will return a helpful error message explaining how to find data.',
   inputSchema: zodToMcpSchema(SearchTablesToolSchema),
 };
 
@@ -303,13 +312,13 @@ export async function executeSearchTables(params: z.infer<typeof SearchTablesToo
  * Generic tool: Get table metadata
  */
 export const GetTableMetadataToolSchema = ApiSourceSchema.extend({
-  table_id: z.string().describe('Unique identifier of the table'),
-  include_default_selection: z.boolean().default(false).describe('Include default variable selections'),
+  table_id: z.string().describe('Unique identifier of the table (obtained from navigation results). Examples: "BE0101N1", "NR0103ENS2010T02A"'),
+  include_default_selection: z.boolean().default(false).describe('Include default variable selections in metadata'),
 });
 
 export const getTableMetadataTool: Tool = {
   name: 'px_get_table_metadata',
-  description: 'Get detailed metadata about a statistical table including variables, values, and structure',
+  description: 'Get detailed metadata about a statistical table including all available variables (dimensions like Age, Time, Region) and their possible values. Essential for understanding table structure before querying data. Use table_id from navigation results.',
   inputSchema: zodToMcpSchema(GetTableMetadataToolSchema),
 };
 
@@ -337,19 +346,19 @@ export async function executeGetTableMetadata(params: z.infer<typeof GetTableMet
  * Generic tool: Query table data
  */
 export const QueryTableDataToolSchema = ApiSourceSchema.extend({
-  table_id: z.string().describe('Unique identifier of the table'),
+  table_id: z.string().describe('Unique identifier of the table (same as used in metadata call)'),
   format: z.enum(['json-stat2', 'csv', 'xlsx', 'px', 'json-px', 'json']).default('json')
-    .describe('Output format for the data'),
+    .describe('Output format for the data. "json" is recommended for Claude processing'),
   variable_selections: z.array(z.object({
-    variable_code: z.string().describe('Variable code (e.g., "Alder", "Tid")'),
-    value_codes: z.array(z.string()).describe('Selected value codes for this variable (e.g., ["tot"], ["2024"])'),
-    filter_type: z.enum(['item', 'all', 'top', 'agg']).default('item').describe('Selection filter type')
-  })).optional().describe('Specific variable and value selections'),
+    variable_code: z.string().describe('Variable code from table metadata (e.g., "Alder" for age, "Tid" for time, "Region" for geography)'),
+    value_codes: z.array(z.string()).describe('Selected value codes for this variable from metadata (e.g., ["tot"] for total, ["2024"] for year 2024, ["00"] for whole country)'),
+    filter_type: z.enum(['item', 'all', 'top', 'agg']).default('item').describe('Selection filter type: "item" for specific values, "all" for all values, "top" for top N values')
+  })).optional().describe('REQUIRED: Specific variable and value selections. Must include selections for all variables or those you want to filter. Get variable codes from table metadata first.'),
 });
 
 export const queryTableDataTool: Tool = {
   name: 'px_query_table_data',
-  description: 'Retrieve statistical data from a table with optional filtering and format selection',
+  description: 'Retrieve actual statistical data from a table. IMPORTANT: Always get table metadata first to understand available variables and values. Requires variable_selections with specific variable codes and value codes from the metadata. Example: [{"variable_code": "Alder", "value_codes": ["tot"]}, {"variable_code": "Tid", "value_codes": ["2024"]}]',
   inputSchema: zodToMcpSchema(QueryTableDataToolSchema),
 };
 
@@ -407,7 +416,7 @@ export const GetApiConfigToolSchema = ApiSourceSchema.pick({ api_source: true, c
 
 export const getApiConfigTool: Tool = {
   name: 'px_get_api_config',
-  description: 'Get API configuration including rate limits, supported languages, and available data formats',
+  description: 'Get API configuration details including rate limits, supported languages (en, sv, fi, is, da, etc.), country coverage, and organization info. Useful for understanding API capabilities and constraints.',
   inputSchema: zodToMcpSchema(GetApiConfigToolSchema),
 };
 
