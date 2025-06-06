@@ -1,5 +1,5 @@
 import fetch, { Response } from 'node-fetch';
-import { PxWebAPI, PxWebRequestOptions, PxWebResponse, PxWebError } from './types.js';
+import { PxWebAPI, PxWebRequestOptions, PxWebResponse, PxWebErrorInfo } from './types.js';
 import { getApiConfig } from './registry.js';
 
 /**
@@ -8,25 +8,16 @@ import { getApiConfig } from './registry.js';
 class RateLimiter {
   private callTimes: Map<string, number[]> = new Map();
 
-  /**
-   * Check if a call is allowed for the given API
-   */
   canMakeCall(apiId: string, config: PxWebAPI): boolean {
     const now = Date.now();
     const calls = this.callTimes.get(apiId) || [];
     
-    // Remove calls outside the rate limit period
     const validCalls = calls.filter(time => now - time < config.rateLimit.period);
-    
-    // Update the tracked calls
     this.callTimes.set(apiId, validCalls);
     
     return validCalls.length < config.rateLimit.calls;
   }
 
-  /**
-   * Record a new API call
-   */
   recordCall(apiId: string): void {
     const now = Date.now();
     const calls = this.callTimes.get(apiId) || [];
@@ -34,9 +25,6 @@ class RateLimiter {
     this.callTimes.set(apiId, calls);
   }
 
-  /**
-   * Get time until next call is allowed (in milliseconds)
-   */
   getTimeUntilNextCall(apiId: string, config: PxWebAPI): number {
     const now = Date.now();
     const calls = this.callTimes.get(apiId) || [];
@@ -51,16 +39,13 @@ class RateLimiter {
 }
 
 /**
- * Generic PX-Web API client
+ * Generic PX-Web API client 
  */
 export class PxWebClient {
   private static rateLimiter = new RateLimiter();
   
   constructor(private config: PxWebAPI) {}
 
-  /**
-   * Create a client from the API registry
-   */
   static fromRegistry(apiId: string): PxWebClient {
     const config = getApiConfig(apiId);
     if (!config) {
@@ -69,9 +54,6 @@ export class PxWebClient {
     return new PxWebClient(config);
   }
 
-  /**
-   * Create a client for a custom endpoint
-   */
   static fromCustomEndpoint(
     baseUrl: string, 
     options: Partial<PxWebAPI> = {}
@@ -95,7 +77,6 @@ export class PxWebClient {
     endpoint: string,
     options: PxWebRequestOptions = {}
   ): Promise<PxWebResponse<T>> {
-    // Check rate limiting
     if (!PxWebClient.rateLimiter.canMakeCall(this.config.id, this.config)) {
       const waitTime = PxWebClient.rateLimiter.getTimeUntilNextCall(this.config.id, this.config);
       throw new PxWebError(
@@ -106,10 +87,7 @@ export class PxWebClient {
       );
     }
 
-    // Build URL
     const url = this.buildUrl(endpoint, options);
-
-    // Prepare headers
     const headers = {
       'Accept': 'application/json',
       'User-Agent': 'MCP-PxWeb-Client/1.0',
@@ -117,15 +95,19 @@ export class PxWebClient {
     };
 
     try {
-      // Record the call for rate limiting
       PxWebClient.rateLimiter.recordCall(this.config.id);
 
-      // Make the request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), options.timeout || 30000);
+
       const response = await fetch(url, {
-        method: 'GET',
+        method: options.method || 'GET',
         headers,
-        timeout: options.timeout || 30000
+        body: options.body ? JSON.stringify(options.body) : undefined,
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new PxWebError(
@@ -167,14 +149,14 @@ export class PxWebClient {
   }
 
   /**
-   * Get list of available databases
+   * Get list of available databases - Traditional PX-Web pattern
    */
   async getDatabases(language: string = 'en'): Promise<PxWebResponse> {
     return this.request(`/${language}`, { language });
   }
 
   /**
-   * Get contents of a specific database path
+   * Get contents of a specific database path - Traditional PX-Web pattern
    */
   async getDatabaseContents(path: string, language: string = 'en'): Promise<PxWebResponse> {
     const cleanPath = path.startsWith('/') ? path.slice(1) : path;
@@ -182,7 +164,7 @@ export class PxWebClient {
   }
 
   /**
-   * Get metadata for a specific table
+   * Get metadata for a specific table - Traditional PX-Web pattern
    */
   async getTableMetadata(tablePath: string, language: string = 'en'): Promise<PxWebResponse> {
     const cleanPath = tablePath.startsWith('/') ? tablePath.slice(1) : tablePath;
@@ -190,36 +172,54 @@ export class PxWebClient {
   }
 
   /**
-   * Query data from a table with filters
+   * Query data from a table with filters - Enhanced for SCB POST format
    */
   async queryData(
     tablePath: string,
-    query: any,
+    selections: any[],
     format: string = 'json',
     language: string = 'en'
   ): Promise<PxWebResponse> {
     const cleanPath = tablePath.startsWith('/') ? tablePath.slice(1) : tablePath;
     const url = `/${language}/${cleanPath}`;
     
-    // For POST requests with query data
+    // Try SCB-style POST body first
+    let postBody;
+    if (this.config.id === 'scb') {
+      // SCB format with 'query' array
+      postBody = {
+        query: selections.map(sel => ({
+          code: sel.code || sel.variable_code,
+          selection: {
+            filter: sel.selection?.filter || 'item',
+            values: sel.selection?.values || sel.value_codes || []
+          }
+        })),
+        response: { format }
+      };
+    } else {
+      // Standard PX-Web format
+      postBody = {
+        query: Array.isArray(selections) ? selections : [selections],
+        response: { format }
+      };
+    }
+
     const response = await fetch(this.buildUrl(url), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify({
-        query: Array.isArray(query) ? query : [query],
-        response: { format }
-      })
+      body: JSON.stringify(postBody)
     });
 
     if (!response.ok) {
       throw new PxWebError(
         'QUERY_FAILED',
-        `Query failed: HTTP ${response.status}`,
+        `Query failed: HTTP ${response.status} - ${response.statusText}`,
         this.config.id,
-        { status: response.status }
+        { status: response.status, statusText: response.statusText }
       );
     }
 
@@ -241,6 +241,19 @@ export class PxWebClient {
   }
 
   /**
+   * Query data with simple GET request (fallback to metadata)
+   */
+  async queryDataSimple(
+    tablePath: string,
+    format: string = 'json',
+    language: string = 'en'
+  ): Promise<PxWebResponse> {
+    // Most PX-Web APIs don't support GET for data without selection
+    // Return metadata instead
+    return this.getTableMetadata(tablePath, language);
+  }
+
+  /**
    * Build full URL for an endpoint
    */
   private buildUrl(endpoint: string, options: PxWebRequestOptions = {}): string {
@@ -249,9 +262,6 @@ export class PxWebClient {
     return `${baseUrl}${cleanEndpoint}`;
   }
 
-  /**
-   * Get API configuration
-   */
   getConfig(): PxWebAPI {
     return { ...this.config };
   }
@@ -260,14 +270,21 @@ export class PxWebClient {
 /**
  * Custom error class for PX-Web API errors
  */
-export class PxWebError extends Error implements PxWebError {
+export class PxWebError extends Error {
+  public code: string;
+  public apiId: string;
+  public details?: any;
+
   constructor(
-    public code: string,
+    code: string,
     message: string,
-    public apiId: string,
-    public details?: any
+    apiId: string,
+    details?: any
   ) {
     super(message);
     this.name = 'PxWebError';
+    this.code = code;
+    this.apiId = apiId;
+    this.details = details;
   }
 }

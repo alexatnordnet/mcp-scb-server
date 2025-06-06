@@ -41,6 +41,12 @@ export interface PxWebRequestOptions {
   headers?: Record<string, string>;
   /** Request timeout in milliseconds */
   timeout?: number;
+  /** HTTP method */
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  /** Request body for POST requests */
+  body?: any;
+  /** Query parameters to append to URL */
+  queryParams?: Record<string, string | number | boolean>;
 }
 
 /**
@@ -84,7 +90,7 @@ export interface PxWebResponse<T = any> {
 /**
  * Error information for failed API calls
  */
-export interface PxWebError {
+export interface PxWebErrorInfo {
   /** Error code */
   code: string;
   /** Error message */

@@ -1,5 +1,5 @@
 /**
- * Main entry point for the PX-Web API Registry System
+ * Main entry point for the PX-Web API Registry System and MCP Server
  */
 
 // Core types
@@ -9,7 +9,13 @@ export * from './types.js';
 export * from './registry.js';
 
 // Generic client
-export * from './client.js';
+export { PxWebClient, PxWebError } from './client.js';
+
+// MCP Server
+export * from './server.js';
+
+// Generic MCP Tools
+export * from './tools/generic.js';
 
 // Re-export commonly used functions for convenience
 import { 

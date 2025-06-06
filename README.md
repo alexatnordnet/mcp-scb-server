@@ -37,21 +37,135 @@ npm run demo
 # Generate and test Kubb code generation
 npm run test-generation
 
+# Test MCP server functionality
+npm run test-mcp
+
+# Verify TypeScript compilation
+npm run verify
+
+# Run all tests comprehensively
+npm run test-all
+
 # Development mode
 npm run dev
 ```
 
 ## Usage
 
-The server provides generic tools like:
-- `px_get_database_list` - List databases from any API
-- `px_get_table_metadata` - Get table information
-- `px_query_data` - Query statistical data
-- `px_search_tables` - Search across APIs
+The server provides 7 generic tools that work across all supported APIs:
+
+### Core Tools
+
+- **`px_discover_apis`** - Find available statistical APIs and their capabilities
+- **`px_get_root_navigation`** - Browse the root database structure
+- **`px_get_navigation_by_path`** - Navigate to specific database paths
+- **`px_search_tables`** - Search for statistical tables with filtering
+- **`px_get_table_metadata`** - Get detailed table structure and variables
+- **`px_query_table_data`** - Retrieve actual statistical data
+- **`px_get_api_config`** - Get API configuration and limits
+
+### Generic API Access
+
+All tools accept an `api_source` parameter to target different APIs:
+
+```typescript
+// Query Sweden's statistics
+{
+  "api_source": "scb",
+  "language": "en"
+}
+
+// Query Finland's statistics  
+{
+  "api_source": "statfi",
+  "language": "en"
+}
+
+// Use a custom PX-Web API
+{
+  "api_source": "custom",
+  "custom_endpoint": "https://your-api.com/PXWeb/api/v1",
+  "language": "en"
+}
+```
+
+## MCP Server Setup
+
+### 1. Start the Server
+
+```bash
+# Development mode
+npm run mcp:dev
+
+# Production mode
+npm run mcp:start
+```
+
+### 2. Configure Claude Desktop
+
+See [claude-desktop-config.md](./claude-desktop-config.md) for detailed setup instructions.
+
+### 3. Test the Server
+
+```bash
+# Test MCP server functionality
+npm run test-mcp
+```
+
+## Example Queries
+
+Once connected to Claude Desktop, you can ask:
+
+- *"What statistical APIs are available?"*
+- *"Show me population data from Sweden"*
+- *"Find economic indicators in Statistics Finland"*
+- *"Get unemployment rates from multiple Nordic countries"*
+- *"Compare demographic data between Sweden and Finland"*
 
 ## Project Structure
 
 - `src/` - Source code
-- `src/generated/` - Auto-generated code from OpenAPI specs
+- `src/generated/` - Auto-generated code from OpenAPI specs  
 - `src/tools/` - MCP tool implementations
 - `specs/` - OpenAPI specifications
+- `scripts/` - Build and maintenance scripts
+
+## Troubleshooting
+
+### TypeScript Compilation Errors
+
+If you encounter TypeScript errors:
+
+1. **Import extension errors**: Run `npm run generate` to regenerate code with fixed imports
+2. **Type conflicts**: Clear generated files with `rm -rf src/generated` then `npm run generate`
+3. **Build cache issues**: Delete `dist/` folder and run `npm run build`
+
+### MCP Server Issues
+
+1. **Server won't start**: 
+   - Check that all dependencies are installed: `npm install`
+   - Verify TypeScript compilation: `npm run verify`
+
+2. **Tools not working**:
+   - Test individual components: `npm run demo` and `npm run test-mcp`
+   - Check Claude Desktop configuration
+
+3. **API rate limits**:
+   - Each statistical agency has different rate limits
+   - The server respects these automatically
+   - Wait if you encounter rate limit errors
+
+### Comprehensive Testing
+
+Run the full test suite:
+
+```bash
+npm run test-all
+```
+
+This will:
+1. Regenerate all code
+2. Verify TypeScript compilation
+3. Test API registry
+4. Test MCP server
+5. Test build process
