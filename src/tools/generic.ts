@@ -55,11 +55,77 @@ function createClientFromParams(params: ApiSourceParams): PxWebClient {
 
 /**
  * Convert Zod schema to MCP input schema format
+ * Properly handles arrays, objects, and nested schemas
  */
 function zodToMcpSchema(zodSchema: z.ZodType<any>): any {
+  // Handle ZodObject
+  if (zodSchema instanceof z.ZodObject) {
+    const properties: any = {};
+    const required: string[] = [];
+    
+    for (const [key, value] of Object.entries(zodSchema.shape)) {
+      properties[key] = zodToMcpSchema(value as z.ZodType<any>);
+      
+      // Check if field is required (not optional)
+      if (!(value instanceof z.ZodOptional)) {
+        required.push(key);
+      }
+    }
+    
+    return {
+      type: "object",
+      properties,
+      required: required.length > 0 ? required : undefined,
+      additionalProperties: false
+    };
+  }
+  
+  // Handle ZodArray
+  if (zodSchema instanceof z.ZodArray) {
+    return {
+      type: "array",
+      items: zodToMcpSchema(zodSchema.element)
+    };
+  }
+  
+  // Handle ZodString
+  if (zodSchema instanceof z.ZodString) {
+    return { type: "string" };
+  }
+  
+  // Handle ZodNumber
+  if (zodSchema instanceof z.ZodNumber) {
+    return { type: "number" };
+  }
+  
+  // Handle ZodBoolean
+  if (zodSchema instanceof z.ZodBoolean) {
+    return { type: "boolean" };
+  }
+  
+  // Handle ZodEnum
+  if (zodSchema instanceof z.ZodEnum) {
+    return {
+      type: "string",
+      enum: zodSchema.options
+    };
+  }
+  
+  // Handle ZodOptional
+  if (zodSchema instanceof z.ZodOptional) {
+    return zodToMcpSchema(zodSchema.unwrap());
+  }
+  
+  // Handle ZodDefault
+  if (zodSchema instanceof z.ZodDefault) {
+    const schema = zodToMcpSchema(zodSchema.removeDefault());
+    schema.default = zodSchema._def.defaultValue();
+    return schema;
+  }
+  
+  // Fallback for unknown types
   return {
     type: "object",
-    properties: {},
     additionalProperties: true
   };
 }
@@ -272,11 +338,12 @@ export async function executeGetTableMetadata(params: z.infer<typeof GetTableMet
  */
 export const QueryTableDataToolSchema = ApiSourceSchema.extend({
   table_id: z.string().describe('Unique identifier of the table'),
-  format: z.enum(['json-stat2', 'csv', 'xlsx', 'px', 'json-px']).default('json-stat2')
+  format: z.enum(['json-stat2', 'csv', 'xlsx', 'px', 'json-px', 'json']).default('json')
     .describe('Output format for the data'),
   variable_selections: z.array(z.object({
-    variable_code: z.string().describe('Variable code'),
-    value_codes: z.array(z.string()).describe('Selected value codes for this variable'),
+    variable_code: z.string().describe('Variable code (e.g., "Alder", "Tid")'),
+    value_codes: z.array(z.string()).describe('Selected value codes for this variable (e.g., ["tot"], ["2024"])'),
+    filter_type: z.enum(['item', 'all', 'top', 'agg']).default('item').describe('Selection filter type')
   })).optional().describe('Specific variable and value selections'),
 });
 
@@ -291,42 +358,34 @@ export async function executeQueryTableData(params: z.infer<typeof QueryTableDat
   
   try {
     if (params.variable_selections && params.variable_selections.length > 0) {
-      // Use POST for complex queries with variable selections
-      const queryBody = params.variable_selections.map(sel => ({
-        code: sel.variable_code,
-        variable_code: sel.variable_code,
-        value_codes: sel.value_codes,
-        selection: {
-          filter: 'item',
-          values: sel.value_codes
+      // Use the WORKING POST format from our curl test
+      const queryBody = {
+        query: params.variable_selections.map(sel => ({
+          code: sel.variable_code,
+          selection: {
+            filter: sel.filter_type || 'item',
+            values: sel.value_codes
+          }
+        })),
+        response: {
+          format: params.format
         }
-      }));
+      };
 
-      const response = await client.queryData(
+      const response = await client.queryDataWithWorkingFormat(
         params.table_id,
         queryBody,
-        params.format,
         params.language
       );
       return response;
     } else {
-      // For simple queries without selections, try to get all data
-      try {
-        const response = await client.queryDataSimple(
-          params.table_id,
-          params.format,
-          params.language
-        );
-        return response;
-      } catch (simpleError) {
-        // If simple query fails, fall back to metadata
-        const response = await client.getTableMetadata(params.table_id, params.language);
-        return {
-          ...response,
-          note: 'Simple data query failed, returned metadata instead. To get actual data, specify variable_selections.',
-          error_details: simpleError instanceof Error ? simpleError.message : 'Unknown error'
-        };
-      }
+      // For simple queries without selections, return metadata with note
+      const response = await client.getTableMetadata(params.table_id, params.language);
+      return {
+        ...response,
+        note: 'No variable selections provided. Returned table metadata. To get actual data, specify variable_selections with variable codes and value codes.',
+        example_usage: 'variable_selections: [{"variable_code": "Alder", "value_codes": ["tot"]}, {"variable_code": "Tid", "value_codes": ["2024"]}]'
+      };
     }
   } catch (error) {
     if (error instanceof PxWebError) {

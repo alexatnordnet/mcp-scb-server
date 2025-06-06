@@ -254,6 +254,81 @@ export class PxWebClient {
   }
 
   /**
+   * Query data using the exact working format from our curl test
+   */
+  async queryDataWithWorkingFormat(
+    tablePath: string,
+    queryBody: any,
+    language: string = 'en'
+  ): Promise<PxWebResponse> {
+    const cleanPath = tablePath.startsWith('/') ? tablePath.slice(1) : tablePath;
+    const url = `/${language}/${cleanPath}`;
+    
+    try {
+      // Record rate limiting
+      PxWebClient.rateLimiter.recordCall(this.config.id);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      // Use the exact format that worked in our curl test
+      const response = await fetch(this.buildUrl(url), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(queryBody),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new PxWebError(
+          'QUERY_FAILED',
+          `Query failed: HTTP ${response.status} - ${response.statusText}`,
+          this.config.id,
+          { 
+            status: response.status, 
+            statusText: response.statusText,
+            url: this.buildUrl(url),
+            requestBody: queryBody
+          }
+        );
+      }
+
+      const data = await response.json();
+      
+      return {
+        data,
+        source: {
+          apiId: this.config.id,
+          apiName: this.config.name,
+          url: this.buildUrl(url)
+        },
+        metadata: {
+          language,
+          format: queryBody.response?.format || 'json',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+    } catch (error) {
+      if (error instanceof PxWebError) {
+        throw error;
+      }
+
+      throw new PxWebError(
+        'REQUEST_FAILED',
+        `Data query request failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        this.config.id,
+        error
+      );
+    }
+  }
+
+  /**
    * Build full URL for an endpoint
    */
   private buildUrl(endpoint: string, options: PxWebRequestOptions = {}): string {
